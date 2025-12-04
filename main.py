@@ -9,6 +9,7 @@ import time
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+last_config = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,13 +102,21 @@ def run_feed_job(config: FeedConfig):
 # ------------------------------------------------------
 @app.post("/process-feed")
 def process_feed(config: FeedConfig):
+    global last_config
+    last_config = config.dict()   # store it
+
     removed = run_feed_job(config)
     return {
         "status": "success",
         "removed_images": removed,
         "ftp_path": config.ftp_target_path
     }
-
+@app.get("/last-config")
+def get_last_config():
+    global last_config
+    if last_config is None:
+        return {"message": "No config has been posted yet"}
+    return last_config
 
 # ------------------------------------------------------
 # SCHEDULER LOGIC
