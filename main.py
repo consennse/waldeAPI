@@ -7,9 +7,12 @@ import schedule
 import threading
 import time
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
 
 app = FastAPI()
-last_config = None
+
+# Store ALL config entries here
+config_history = []   # list of {timestamp, config}
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,9 +34,8 @@ class FeedConfig(BaseModel):
 
 
 # ------------------------------------------------------
-# CORE FUNCTIONS (not API specific)
+# CORE FUNCTIONS
 # ------------------------------------------------------
-
 def fetch_xml(url: str):
     resp = requests.get(url)
     resp.raise_for_status()
@@ -67,15 +69,13 @@ def upload_via_ftp(local_file, ftp_host, ftp_username, ftp_password, ftp_target_
 
 
 # ------------------------------------------------------
-# MAIN PROCESS FUNCTION (used by API & Scheduler)
+# PROCESS FEED
 # ------------------------------------------------------
 def run_feed_job(config: FeedConfig):
-    # Fetch feed
     xml_bytes = fetch_xml(config.source_url)
     parser = etree.XMLParser(remove_blank_text=True)
     root = etree.fromstring(xml_bytes, parser)
 
-    # Clean feed
     removed = remove_teaser_images(root)
 
     cleaned_xml = etree.tostring(
@@ -102,32 +102,52 @@ def run_feed_job(config: FeedConfig):
 # ------------------------------------------------------
 @app.post("/process-feed")
 def process_feed(config: FeedConfig):
-    global last_config
-    last_config = config.dict()   # store it
+    global config_history
+
+    # Save config + timestamp
+    config_history.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "config": config.dict()
+    })
 
     removed = run_feed_job(config)
+
     return {
         "status": "success",
         "removed_images": removed,
         "ftp_path": config.ftp_target_path
     }
-@app.get("/last-config")
-def get_last_config():
-    global last_config
-    if last_config is None:
-        return {"message": "No config has been posted yet"}
-    return last_config
+
 
 # ------------------------------------------------------
-# SCHEDULER LOGIC
+# GET LAST CONFIG
+# ------------------------------------------------------
+@app.get("/last-config")
+def get_last_config():
+    if not config_history:
+        return {"message": "No config has been posted yet"}
+
+    return config_history[-1]
+
+
+# ------------------------------------------------------
+# GET FULL HISTORY
+# ------------------------------------------------------
+@app.get("/config-history")
+def get_config_history():
+    return config_history
+
+
+# ------------------------------------------------------
+# SCHEDULER
 # ------------------------------------------------------
 scheduler_running = False
 
 def scheduler_loop():
-    """Runs in background thread."""
     while scheduler_running:
         schedule.run_pending()
         time.sleep(1)
+
 
 @app.post("/start-scheduler")
 def start_scheduler(config: FeedConfig):
@@ -138,13 +158,13 @@ def start_scheduler(config: FeedConfig):
 
     scheduler_running = True
 
-    # Schedule the job every hour
     schedule.every().hour.do(lambda: run_feed_job(config))
 
     thread = threading.Thread(target=scheduler_loop)
     thread.start()
 
     return {"message": "Scheduler started (runs every 1 hour)"}
+
 
 @app.post("/stop-scheduler")
 def stop_scheduler():
@@ -154,7 +174,7 @@ def stop_scheduler():
 
 
 # ------------------------------------------------------
-# HEALTH CHECK / HOME
+# HEALTH CHECK
 # ------------------------------------------------------
 @app.get("/")
 def home():
