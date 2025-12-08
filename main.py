@@ -141,6 +141,9 @@ def get_config_history():
 # ------------------------------------------------------
 # SCHEDULER
 # ------------------------------------------------------
+# ------------------------------------------------------
+# SCHEDULER
+# ------------------------------------------------------
 scheduler_running = False
 
 def scheduler_loop():
@@ -158,13 +161,13 @@ def start_scheduler(config: FeedConfig):
 
     scheduler_running = True
 
-    schedule.every().hour.do(lambda: run_feed_job(config))
+    # Run every 1 minute
+    schedule.every(1).minutes.do(lambda: run_feed_job(config))
 
     thread = threading.Thread(target=scheduler_loop)
     thread.start()
 
-    return {"message": "Scheduler started (runs every 1 hour)"}
-
+    return {"message": "Scheduler started (runs every 1 minute)"}
 
 @app.post("/stop-scheduler")
 def stop_scheduler():
